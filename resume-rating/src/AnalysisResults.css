@@ -1,0 +1,11 @@
+.highlight {
+  background-color: lightsalmon;
+}
+
+.highlight-unique {
+  background-color: lightseagreen;
+}
+
+.highlighted-text {
+  white-space: pre-wrap;
+}

@@ -1,0 +1,215 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: CloudFormation template for Job Relevance Scoring Application
+
+Resources:
+  # DynamoDB Table for storing extracted text
+  ResumesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: ResumesTable
+      AttributeDefinitions:
+        - AttributeName: DocumentID
+          AttributeType: S
+      KeySchema:
+        - AttributeName: DocumentID
+          KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+      Tags:
+        - Key: Name
+          Value: ResumesTable
+
+  # Lambda Functions
+  AnalyzeDocumentFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: AnalyzeDocument
+      Runtime: python3.12
+      Handler: lambda_function.lambda_handler
+      Code:
+        S3Bucket: term-project-lambda-function
+        S3Key: AnalyzeDocument.zip
+      Role: arn:aws:iam::<role-code>:role/LabRole
+
+  ExtractTextFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: ExtractText
+      Runtime: python3.12
+      Handler: lambda_function.lambda_handler
+      Code:
+        S3Bucket: term-project-lambda-function
+        S3Key: ExtractTextFunction.zip
+      Role: arn:aws:iam::<role-code>:role/LabRole
+
+  UploadDocumentFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: UploadDocument
+      Runtime: python3.12
+      Handler: lambda_function.lambda_handler
+      Code:
+        S3Bucket: term-project-lambda-function
+        S3Key: UploadDocumentFunction.zip
+      Role: arn:aws:iam::<role-code>:role/LabRole
+
+  # API Gateway configured as a regional endpoint
+  JobApiGateway:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: JobRelevanceScoringAPI
+      EndpointConfiguration:
+        Types:
+          - REGIONAL
+
+  # API Resources
+  AnalyzeResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref JobApiGateway
+      ParentId: !GetAtt JobApiGateway.RootResourceId
+      PathPart: 'analyze'
+
+  ExtractResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref JobApiGateway
+      ParentId: !GetAtt JobApiGateway.RootResourceId
+      PathPart: 'extract'
+
+  UploadResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref JobApiGateway
+      ParentId: !GetAtt JobApiGateway.RootResourceId
+      PathPart: 'upload'
+
+  # OPTIONS method configurations for CORS support
+  AnalyzeOptions:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref JobApiGateway
+      ResourceId: !Ref AnalyzeResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        RequestTemplates:
+          application/json: "{\"statusCode\": 200}"
+        IntegrationResponses:
+          - StatusCode: 200
+
+
+  ExtractOptions:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref JobApiGateway
+      ResourceId: !Ref ExtractResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        RequestTemplates:
+          application/json: "{\"statusCode\": 200}"
+        IntegrationResponses:
+          - StatusCode: 200
+
+
+  UploadOptions:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref JobApiGateway
+      ResourceId: !Ref UploadResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        RequestTemplates:
+          application/json: "{\"statusCode\": 200}"
+        IntegrationResponses:
+          - StatusCode: 200
+
+  # POST Methods to invoke Lambda functions
+  AnalyzePost:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref JobApiGateway
+      ResourceId: !Ref AnalyzeResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AnalyzeDocumentFunction.Arn}/invocations'
+      MethodResponses:
+        - StatusCode: 200
+
+  ExtractPost:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref JobApiGateway
+      ResourceId: !Ref ExtractResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ExtractTextFunction.Arn}/invocations'
+      MethodResponses:
+        - StatusCode: 200
+
+  UploadPost:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref JobApiGateway
+      ResourceId: !Ref UploadResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${UploadDocumentFunction.Arn}/invocations'
+      MethodResponses:
+        - StatusCode: 200
+
+  # Permissions for API Gateway to invoke Lambda functions
+  AnalyzeLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt AnalyzeDocumentFunction.Arn
+      Action: "lambda:InvokeFunction"
+      Principal: "apigateway.amazonaws.com"
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${JobApiGateway}/*/POST/analyze"
+
+  ExtractLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt ExtractTextFunction.Arn
+      Action: "lambda:InvokeFunction"
+      Principal: "apigateway.amazonaws.com"
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${JobApiGateway}/*/POST/extract"
+
+  UploadLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt UploadDocumentFunction.Arn
+      Action: "lambda:InvokeFunction"
+      Principal: "apigateway.amazonaws.com"
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${JobApiGateway}/*/POST/upload"
+
+  # API Gateway Deployment
+  JobApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    Properties:
+      RestApiId: !Ref JobApiGateway
+      StageName: prod
+    DependsOn:
+      - AnalyzePost
+      - ExtractPost
+      - UploadPost
+
+Outputs:
+  ApiUrl:
+    Description: "URL of the API Gateway"
+    Value: !Sub "https://${JobApiGateway}.execute-api.${AWS::Region}.amazonaws.com/prod"
